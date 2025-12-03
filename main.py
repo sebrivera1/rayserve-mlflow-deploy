@@ -4,17 +4,17 @@ import pandas as pd
 from typing import Optional, Dict, Any
 from ray import serve
 from fastapi import FastAPI, Header, HTTPException, status
-from pydantic import BaseModel
 
-# Configure MLflow tracking URI from environment
+# Configure MLflow
 mlflow.set_tracking_uri(os.getenv("MLFLOW_TRACKING_URI", "http://localhost:5000"))
 
+# Create FastAPI app b4 deployment class
 app = FastAPI(title="MLflow Model Serving", version="1.0.0")
 
 @serve.deployment
 @serve.ingress(app)
 class ModelDeployment:
-    def __init__(self, model_name: str, default_version: str = "1"):
+    def __init__(self, model_name: str = "translation_model", default_version: str = "1"):
         self.model_name = model_name
         self.default_version = default_version
         
@@ -50,14 +50,28 @@ class ModelDeployment:
                 status_code=status.HTTP_409_CONFLICT,
                 detail=str(e)
             )
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Error loading model: {str(e)}"
+            )
         
         # Convert input to DataFrame
         df = pd.DataFrame({k: [v] for k, v in model_input.items()})
         
         # Get prediction
-        result = model.predict(df)
-        
-        return {"prediction": result, "version": version, "model": self.model_name}
+        try:
+            result = model.predict(df)
+            return {
+                "prediction": result, 
+                "version": version, 
+                "model": self.model_name
+            }
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Prediction error: {str(e)}"
+            )
     
     @app.get("/health")
     async def health(self):
@@ -87,5 +101,8 @@ if __name__ == "__main__":
     MODEL_VERSION = os.getenv("MODEL_VERSION", "1")
     
     # Create and run deployment
-    deployment = ModelDeployment.bind(model_name=MODEL_NAME, default_version=MODEL_VERSION)
+    deployment = ModelDeployment.bind(
+        model_name=MODEL_NAME, 
+        default_version=MODEL_VERSION
+    )
     serve.run(deployment, host="0.0.0.0", port=8000)
