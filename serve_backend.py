@@ -1,0 +1,90 @@
+import os
+import mlflow
+import pandas as pd
+from typing import Optional
+from ray import serve
+from fastapi import FastAPI, Header, HTTPException, status
+from pydantic import BaseModel, create_model
+from mlflow.models import ModelSignature
+
+# Configure MLflow tracking URI from environment
+mlflow.set_tracking_uri(os.getenv("MLFLOW_TRACKING_URI", "http://localhost:5000"))
+
+app = FastAPI()
+
+def create_input_model_from_signature(signature: ModelSignature):
+    """Dynamically create Pydantic model from MLflow signature"""
+    fields = {}
+    for input_spec in signature.inputs.inputs:
+        fields[input_spec.name] = (str, ...)
+    return create_model("DynamicInput", **fields)
+
+def deployment_from_model_name(model_name: str, default_version: str = "1"):
+    """Create Ray Serve deployment from MLflow model name"""
+    
+    # Load default model to get signature
+    default_model = mlflow.pyfunc.load_model(f"models:/{model_name}/{default_version}")
+    default_signature = default_model.metadata.signature
+    
+    # Create dynamic input model from signature
+    InputModel = create_input_model_from_signature(default_signature)
+    
+    @serve.deployment
+    @serve.ingress(app)
+    class DynamicDeployment:
+        def __init__(self, model_name: str, default_version: str):
+            self.model_name = model_name
+            self.default_version = default_version
+            self.default_signature = default_signature
+            
+        def load_model(self, version: str):
+            """Load model with signature validation"""
+            model = mlflow.pyfunc.load_model(f"models:/{self.model_name}/{version}")
+            
+            # Validate signature compatibility
+            if model.metadata.signature != self.default_signature:
+                raise ValueError(f"Model version {version} has incompatible signature")
+            
+            return model
+        
+        @app.post("/predict")
+        async def predict(
+            self, 
+            model_input: InputModel,
+            serve_multiplexed_model_id: Optional[str] = Header(None)
+        ):
+            """Prediction endpoint with version multiplexing"""
+            version = serve_multiplexed_model_id or self.default_version
+            
+            try:
+                model = self.load_model(version)
+            except ValueError as e:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=str(e)
+                )
+            
+            # Convert input to DataFrame
+            input_dict = model_input.dict()
+            df = pd.DataFrame({k: [v] for k, v in input_dict.items()})
+            
+            # Get prediction
+            result = model.predict(df)
+            
+            return {"prediction": result}
+        
+        @app.get("/health")
+        async def health(self):
+            """Health check endpoint"""
+            return {"status": "healthy", "model": self.model_name}
+    
+    return DynamicDeployment.bind(model_name=model_name, default_version=default_version)
+
+if __name__ == "__main__":
+    # Get configuration from environment
+    MODEL_NAME = os.getenv("MODEL_NAME", "translation_model")
+    MODEL_VERSION = os.getenv("MODEL_VERSION", "1")
+    
+    # Create and run deployment
+    deployment = deployment_from_model_name(MODEL_NAME, MODEL_VERSION)
+    serve.run(deployment, host="0.0.0.0", port=8000)
