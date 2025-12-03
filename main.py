@@ -2,107 +2,84 @@ import os
 import mlflow
 import pandas as pd
 from typing import Optional, Dict, Any
-from ray import serve
 from fastapi import FastAPI, Header, HTTPException, status
+import uvicorn
 
 # Configure MLflow
 mlflow.set_tracking_uri(os.getenv("MLFLOW_TRACKING_URI", "http://localhost:5000"))
 
-# Create FastAPI app b4 deployment class
 app = FastAPI(title="MLflow Model Serving", version="1.0.0")
 
-@serve.deployment
-@serve.ingress(app)
-class ModelDeployment:
-    def __init__(self, model_name: str = "translation_model", default_version: str = "1"):
-        self.model_name = model_name
-        self.default_version = default_version
-        
-        # Load default model
-        self.default_model = mlflow.pyfunc.load_model(
-            f"models:/{self.model_name}/{self.default_version}"
+# Global model cache
+MODEL_CACHE = {}
+
+def get_model(model_name: str, version: str):
+    """Load and cache model"""
+    cache_key = f"{model_name}:{version}"
+    
+    if cache_key not in MODEL_CACHE:
+        MODEL_CACHE[cache_key] = mlflow.pyfunc.load_model(
+            f"models:/{model_name}/{version}"
         )
-        self.default_signature = self.default_model.metadata.signature
-        
-    def load_model(self, version: str):
-        """Load model with signature validation"""
-        model = mlflow.pyfunc.load_model(f"models:/{self.model_name}/{version}")
-        
-        # Validate signature compatibility
-        if model.metadata.signature != self.default_signature:
-            raise ValueError(f"Model version {version} has incompatible signature")
-        
-        return model
     
-    @app.post("/predict")
-    async def predict(
-        self, 
-        model_input: Dict[str, Any],
-        serve_multiplexed_model_id: Optional[str] = Header(None)
-    ):
-        """Prediction endpoint with version multiplexing"""
-        version = serve_multiplexed_model_id or self.default_version
-        
-        try:
-            model = self.load_model(version)
-        except ValueError as e:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=str(e)
-            )
-        except Exception as e:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Error loading model: {str(e)}"
-            )
-        
-        # Convert input to DataFrame
-        df = pd.DataFrame({k: [v] for k, v in model_input.items()})
-        
-        # Get prediction
-        try:
-            result = model.predict(df)
-            return {
-                "prediction": result, 
-                "version": version, 
-                "model": self.model_name
-            }
-        except Exception as e:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Prediction error: {str(e)}"
-            )
+    return MODEL_CACHE[cache_key]
+
+@app.post("/predict")
+async def predict(
+    model_input: Dict[str, Any],
+    serve_multiplexed_model_id: Optional[str] = Header(None)
+):
+    """Prediction endpoint with version multiplexing"""
+    model_name = os.getenv("MODEL_NAME", "translation_model")
+    version = serve_multiplexed_model_id or os.getenv("MODEL_VERSION", "1")
     
-    @app.get("/health")
-    async def health(self):
-        """Health check endpoint"""
+    try:
+        model = get_model(model_name, version)
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error loading model: {str(e)}"
+        )
+    
+    # Convert input to DataFrame
+    df = pd.DataFrame({k: [v] for k, v in model_input.items()})
+    
+    # Get prediction
+    try:
+        result = model.predict(df)
         return {
-            "status": "healthy", 
-            "model": self.model_name,
-            "default_version": self.default_version
+            "prediction": result, 
+            "version": version, 
+            "model": model_name
         }
-    
-    @app.get("/")
-    async def root(self):
-        """Root endpoint"""
-        return {
-            "service": "MLflow Model Serving",
-            "model": self.model_name,
-            "endpoints": {
-                "predict": "/predict",
-                "health": "/health",
-                "docs": "/docs"
-            }
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Prediction error: {str(e)}"
+        )
+
+@app.get("/health")
+async def health():
+    """Health check endpoint"""
+    return {
+        "status": "healthy", 
+        "model": os.getenv("MODEL_NAME", "translation_model"),
+        "default_version": os.getenv("MODEL_VERSION", "1")
+    }
+
+@app.get("/")
+async def root():
+    """Root endpoint"""
+    return {
+        "service": "MLflow Model Serving",
+        "model": os.getenv("MODEL_NAME", "translation_model"),
+        "endpoints": {
+            "predict": "/predict",
+            "health": "/health",
+            "docs": "/docs"
         }
+    }
 
 if __name__ == "__main__":
-    # Get configuration from environment
-    MODEL_NAME = os.getenv("MODEL_NAME", "translation_model")
-    MODEL_VERSION = os.getenv("MODEL_VERSION", "1")
-    
-    # Create and run deployment
-    deployment = ModelDeployment.bind(
-        model_name=MODEL_NAME, 
-        default_version=MODEL_VERSION
-    )
-    serve.run(deployment, host="0.0.0.0", port=8000)
+    port = int(os.getenv("PORT", 8000))
+    uvicorn.run(app, host="0.0.0.0", port=port)
