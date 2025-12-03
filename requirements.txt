@@ -1,10 +1,2 @@
-mlflow
-ray[serve]
-fastapi
-uvicorn
-pandas
-pydantic
 gradio
 requests
-transformers
-torch
