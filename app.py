@@ -92,8 +92,8 @@ with gr.Blocks(title="Power Lifting SBD Predictor") as demo:
 
         with gr.Column():
             squat_input = gr.Slider(minimum=0, maximum=1000, value=50, label="Squat (kg)")
-            bench_input = gr.Slider(minimum=0, maximum=300, value=60, label="Bench Press (kg)")
-            deadlift_input = gr.Slider(minimum=0, maximum=600, value=0, label="Deadlift (kg)")
+            bench_input = gr.Slider(minimum=0, maximum=635, value=60, label="Bench Press (kg)")
+            deadlift_input = gr.Slider(minimum=0, maximum=1000, value=0, label="Deadlift (kg)")
 
     with gr.Row():
         model_version = gr.Textbox(
