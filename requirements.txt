@@ -1,9 +1,7 @@
 mlflow
-ray[serve]
 fastapi
-uvicorn
+uvicorn[standard]
 pandas
-pydantic
 requests
 transformers
 torch
