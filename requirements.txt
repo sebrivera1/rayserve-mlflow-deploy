@@ -1,5 +1,5 @@
 mlflow
-ray[serve]==2.9.0
+ray[serve]
 fastapi
 uvicorn
 pandas
