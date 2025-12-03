@@ -9,7 +9,7 @@ WORKDIR /app
 # Copy requirements first for layer caching
 COPY requirements.txt .
 
-# Install with uv (10x faster than pip)
+# Install with uv 
 RUN uv pip install --system --no-cache -r requirements.txt
 
 # Copy application
