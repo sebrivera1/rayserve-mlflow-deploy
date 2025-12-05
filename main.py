@@ -89,11 +89,15 @@ async def predict(
     # Create DataFrame from input
     df = pd.DataFrame({k: [v] for k, v in request.model_input.items()})
 
+    # Remove non-numeric columns (like 'name') that shouldn't be used for prediction
+    numeric_columns = df.select_dtypes(include=[np.number]).columns.tolist()
+    df_numeric = df[numeric_columns]
+
     try:
         # Suppress sklearn feature names warning for models trained without feature names
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", message="X has feature names")
-            result = model.predict(df)
+            result = model.predict(df_numeric)
 
         return {
             "prediction": result.tolist() if hasattr(result, 'tolist') else result,
@@ -104,9 +108,11 @@ async def predict(
         # Log detailed error information
         print(f"Prediction error details:")
         print(f"  Error: {str(e)}")
-        print(f"  Input data shape: {df.shape}")
-        print(f"  Input columns: {df.columns.tolist()}")
-        print(f"  Input data: {df.to_dict()}")
+        print(f"  Original input shape: {df.shape}")
+        print(f"  Original columns: {df.columns.tolist()}")
+        print(f"  Numeric input shape: {df_numeric.shape}")
+        print(f"  Numeric columns: {df_numeric.columns.tolist()}")
+        print(f"  Numeric data: {df_numeric.to_dict()}")
 
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
