@@ -1,7 +1,9 @@
 import os
 import mlflow
 import pandas as pd
+import numpy as np
 import uvicorn
+import warnings
 from typing import Optional, Dict, Any
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Header, HTTPException, status
@@ -84,16 +86,28 @@ async def predict(
             detail=f"Error loading model: {str(e)}"
         )
     
+    # Create DataFrame from input
     df = pd.DataFrame({k: [v] for k, v in request.model_input.items()})
-    
+
     try:
-        result = model.predict(df)
+        # Suppress sklearn feature names warning for models trained without feature names
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", message="X has feature names")
+            result = model.predict(df)
+
         return {
             "prediction": result.tolist() if hasattr(result, 'tolist') else result,
             "version": version,
             "model": MODEL_NAME
         }
     except Exception as e:
+        # Log detailed error information
+        print(f"Prediction error details:")
+        print(f"  Error: {str(e)}")
+        print(f"  Input data shape: {df.shape}")
+        print(f"  Input columns: {df.columns.tolist()}")
+        print(f"  Input data: {df.to_dict()}")
+
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Prediction error: {str(e)}"
