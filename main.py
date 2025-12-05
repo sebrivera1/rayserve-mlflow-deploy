@@ -3,36 +3,55 @@ import mlflow
 import pandas as pd
 import uvicorn
 from typing import Optional, Dict, Any
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, Header, HTTPException, status
 from pydantic import BaseModel
 
-# Initialize MLflow
-mlflow.set_tracking_uri(os.getenv("MLFLOW_TRACKING_URI", "http://localhost:5000"))
-
-# FastAPI app
-app = FastAPI(title="MLflow Model Serving", version="1.0.0")
-
 # Global state
-MODEL_NAME = os.getenv("MODEL_NAME", "translation_model")
+MODEL_NAME = os.getenv("MODEL_NAME", "Demo-DummyModel")
 MODEL_VERSION = os.getenv("MODEL_VERSION", "1")
 model_cache = {}
 default_signature = None
 
-class PredictRequest(BaseModel):
-    model_input: Dict[str, Any]
-    version: Optional[str] = None
-
-@app.on_event("startup")
-async def startup_event():
-    """Load default model on startup"""
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Lifespan event handler for startup and shutdown"""
     global default_signature
+
+    # Initialize MLflow with proper URI scheme
+    tracking_uri = os.getenv("MLFLOW_TRACKING_URI", "http://localhost:5000")
+    # Ensure proper URI scheme (http/https)
+    if not tracking_uri.startswith(("http://", "https://")):
+        tracking_uri = f"http://{tracking_uri}"
+
+    mlflow.set_tracking_uri(tracking_uri)
+    print(f"MLflow tracking URI set to: {tracking_uri}")
+
+    # Load default model on startup
     try:
         model_uri = f"models:/{MODEL_NAME}/{MODEL_VERSION}"
-        model_cache[MODEL_VERSION] = mlflow.pyfunc.load_model(model_uri)
-        default_signature = model_cache[MODEL_VERSION].metadata.signature
+        loaded_model = mlflow.pyfunc.load_model(model_uri)
+        model_cache[MODEL_VERSION] = loaded_model
+
+        # Safely get signature
+        if loaded_model.metadata and hasattr(loaded_model.metadata, 'signature'):
+            default_signature = loaded_model.metadata.signature
+
         print(f"Loaded default model: {MODEL_NAME} version {MODEL_VERSION}")
     except Exception as e:
         print(f"Warning: Could not load default model: {e}")
+
+    yield
+
+    # Cleanup on shutdown (if needed)
+    model_cache.clear()
+
+# FastAPI app with lifespan
+app = FastAPI(title="MLflow Model Serving", version="1.0.0", lifespan=lifespan)
+
+class PredictRequest(BaseModel):
+    model_input: Dict[str, Any]
+    version: Optional[str] = None
 
 def load_model(version: str):
     """Load model with caching"""
