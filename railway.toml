@@ -6,3 +6,9 @@ providers = ["python"]
 
 [build.nixpacksPlan.phases.setup]
 nixPkgs = ["python311"]
+
+[build.nixpacksPlan.phases.start]
+cmd = "python app.py"
+
+[deploy]
+startCommand = "python app.py"
