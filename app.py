@@ -99,7 +99,7 @@ with gr.Blocks(title="Power Lifting SBD Predictor") as demo:
         health_output = gr.Textbox(label="Backend Status", interactive=False)
         health_btn = gr.Button("Check Health")
 
-    gr.Markdown("## Enter Your Fitness Metrics")
+    gr.Markdown("## Enter Your Height/weight and Personal Records")
 
     with gr.Row():
         with gr.Column():
