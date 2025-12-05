@@ -1,4 +1,11 @@
 import os
+import json
+
+# Set thread limits FIRST before any other imports
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+
 import ray
 import mlflow
 import pandas as pd
@@ -10,7 +17,7 @@ mlflow.set_tracking_uri(os.getenv("MLFLOW_TRACKING_URI", "http://localhost:5000"
 
 app = FastAPI(title="MLflow Model Serving", version="1.0.0")
 
-@serve.deployment
+@serve.deployment(num_replicas=1, ray_actor_options={"num_cpus": 1})
 @serve.ingress(app)
 class ModelDeployment:
     def __init__(self, model_name: str = "translation_model", default_version: str = "1"):
@@ -66,9 +73,15 @@ if __name__ == "__main__":
     PORT = int(os.getenv("PORT", 8000))
     
     ray.init(
-        num_cpus=4,
-        object_store_memory=2 * 1024 * 1024 * 1024,
-        _system_config={"automatic_object_spilling_enabled": True}
+        num_cpus=2,
+        object_store_memory=1 * 1024 * 1024 * 1024,
+        _plasma_directory="/tmp",
+        _system_config={
+            "object_spilling_config": json.dumps(
+                {"type": "filesystem", "params": {"directory_path": "/tmp/spill"}}
+            ),
+            "max_io_workers": 2
+        }
     )
     
     serve.start(http_options={"host": "0.0.0.0", "port": PORT})
