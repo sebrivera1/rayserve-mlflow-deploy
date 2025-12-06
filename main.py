@@ -31,19 +31,32 @@ async def lifespan(app: FastAPI):
     mlflow.set_tracking_uri(tracking_uri)
     print(f"MLflow tracking URI set to: {tracking_uri}")
 
-    # Load default model on startup
+    # Load default models on startup
     try:
-        model_uri = f"models:/{MODEL_NAME}/{MODEL_VERSION}"
-        loaded_model = mlflow.pyfunc.load_model(model_uri)
-        model_cache[MODEL_VERSION] = loaded_model
+        # Load model 1 (clustering)
+        model_uri_1 = f"models:/{MODEL_NAME}/{MODEL_VERSION}"
+        loaded_model_1 = mlflow.pyfunc.load_model(model_uri_1)
+        cache_key_1 = f"{MODEL_NAME}:{MODEL_VERSION}"
+        model_cache[cache_key_1] = loaded_model_1
 
         # Safely get signature
-        if loaded_model.metadata and hasattr(loaded_model.metadata, 'signature'):
-            default_signature = loaded_model.metadata.signature
+        if loaded_model_1.metadata and hasattr(loaded_model_1.metadata, 'signature'):
+            default_signature = loaded_model_1.metadata.signature
 
-        print(f"Loaded default model: {MODEL_NAME} version {MODEL_VERSION}")
+        print(f"Loaded model 1 (clustering): {MODEL_NAME} version {MODEL_VERSION}")
     except Exception as e:
-        print(f"Warning: Could not load default model: {e}")
+        print(f"Warning: Could not load model 1 (clustering): {e}")
+
+    try:
+        # Load model 2 (total predictor)
+        model_uri_2 = f"models:/{MODEL_2_NAME}/{MODEL_2_VERSION}"
+        loaded_model_2 = mlflow.pyfunc.load_model(model_uri_2)
+        cache_key_2 = f"{MODEL_2_NAME}:{MODEL_2_VERSION}"
+        model_cache[cache_key_2] = loaded_model_2
+
+        print(f"Loaded model 2 (total predictor): {MODEL_2_NAME} version {MODEL_2_VERSION}")
+    except Exception as e:
+        print(f"Warning: Could not load model 2 (total predictor): {e}")
 
     yield
 
