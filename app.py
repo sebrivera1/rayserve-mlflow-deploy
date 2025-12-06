@@ -26,7 +26,7 @@ if "railway.internal" in BACKEND_URL:
 #debug print
 #print(f"[INFO] Backend URL configured as: {BACKEND_URL}")
 
-def predict(name, height, weight, squat, bench, deadlift, sex):
+def predict(name, weight, squat, bench, deadlift, sex):
     """Send prediction request to backend"""
 
     # Prepare request
@@ -150,7 +150,7 @@ with gr.Blocks(title="Power Lifting SBD Predictor") as demo:
     health_btn.click(fn=check_health, outputs=health_output)
     submit_btn.click(
         fn=predict,
-        inputs=[name_input, height_input, weight_input, squat_input, bench_input, deadlift_input, sex_input],
+        inputs=[name_input, weight_input, squat_input, bench_input, deadlift_input, sex_input],
         outputs=output
     )
 
