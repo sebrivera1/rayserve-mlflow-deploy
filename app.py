@@ -133,7 +133,7 @@ with gr.Blocks(title="Power Lifting SBD Predictor") as demo:
     health_btn.click(fn=check_health, outputs=health_output)
     submit_btn.click(
         fn=predict,
-        inputs=[name_input, squat_input, bench_input, deadlift_input],
+        inputs=[name_input, height_input, weight_input, squat_input, bench_input, deadlift_input, sex_input],
         outputs=output
     )
 
