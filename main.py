@@ -545,9 +545,13 @@ async def predict_full(
 
         logger.info(f"[Model 2] ✓ Total prediction: {total_prediction}")
 
+        # Convert numpy types to native Python types for JSON serialization
+        cluster_pred_value = int(cluster_value) if isinstance(cluster_value, (int, float, np.integer, np.floating)) else cluster_value
+        total_pred_value = float(total_prediction) if isinstance(total_prediction, (int, float, np.integer, np.floating)) else total_prediction
+
         response = {
-            "cluster_prediction": int(cluster_value) if isinstance(cluster_value, (int, float)) else cluster_value,
-            "total_prediction": float(total_prediction) if isinstance(total_prediction, (int, float)) else total_prediction,
+            "cluster_prediction": cluster_pred_value,
+            "total_prediction": total_pred_value,
             "model_1_version": version_1,
             "model_2_version": version_2,
             "model_1_name": MODEL_NAME,
@@ -556,11 +560,11 @@ async def predict_full(
                 "name": payload_lower.get('name', 'Unknown'),
                 "bodyweight_kg": float(payload_lower.get('weight', 0.0)),
                 "sex": payload_lower.get('sex', 'M').upper(),
-                "squat_kg": squat_kg,
-                "bench_kg": bench_kg,
-                "deadlift_kg": deadlift_kg,
+                "squat_kg": float(squat_kg),
+                "bench_kg": float(bench_kg),
+                "deadlift_kg": float(deadlift_kg),
                 "squat_first_attempt": float(payload_lower.get('squat_first_attempt', squat_kg)),
-                "long_distance": payload_lower.get('long_distance', False)
+                "long_distance": bool(payload_lower.get('long_distance', False))
             }
         }
 
