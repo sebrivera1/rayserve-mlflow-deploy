@@ -87,7 +87,17 @@ Model Info:
         else:
             # Fallback if backend unavailable
             result = f"""
+<<<<<<< HEAD
 Predictions for {name}:
+=======
+Cluster Prediction for {name}:
+- Weight: {weight} kg
+- Squat: {squat} kg
+- Bench: {bench} kg
+- Deadlift: {deadlift} kg
+- Sex: {sex}
+- Total: {total} kg
+>>>>>>> e5c8c69266310150c7efaceefefb67a0b214adc1
 
 Note: Backend unavailable (status {response.status_code})
 
@@ -106,7 +116,17 @@ Input Summary:
     except Exception as e:
         # Fallback if backend unavailable
         result = f"""
+<<<<<<< HEAD
 Predictions for {name}:
+=======
+Cluster Prediction for {name}:
+- Weight: {weight} kg
+- Squat: {squat} kg
+- Bench: {bench} kg
+- Deadlift: {deadlift} kg
+- Sex: {sex}
+- Total: {total} kg
+>>>>>>> e5c8c69266310150c7efaceefefb67a0b214adc1
 
 Note: Cannot connect to backend ({str(e)})
 
@@ -149,15 +169,25 @@ with gr.Blocks(title="Power Lifting SBD Predictor") as demo:
     with gr.Row():
         with gr.Column():
             name_input = gr.Textbox(label="Name", placeholder="Enter your name")
+<<<<<<< HEAD
             weight_input = gr.Slider(minimum=30, maximum=200, value=75, label="Bodyweight (kg)")
             sex_input = gr.Radio(choices=["M", "F"], value="M", label="Sex")
             long_distance_input = gr.Checkbox(label="Long Distance Travel", value=False)
+=======
+            weight_input = gr.Slider(minimum=30, maximum=2000, value=75, label="Weight (kg)")
+            sex_input = gr.Radio(choices=["M", "F"], value="M", label="Sex")
+            long_distance = gr.Checkbox(label="Long Distance")
+>>>>>>> e5c8c69266310150c7efaceefefb67a0b214adc1
 
         with gr.Column():
             squat_input = gr.Slider(minimum=0, maximum=1000, value=150, label="Squat Max (kg)")
             bench_input = gr.Slider(minimum=0, maximum=700, value=100, label="Bench Press Max (kg)")
             deadlift_input = gr.Slider(minimum=0, maximum=1000, value=180, label="Deadlift Max (kg)")
+<<<<<<< HEAD
             squat_first_attempt_input = gr.Slider(minimum=0, maximum=1000, value=145, label="First Squat Attempt (kg)")
+=======
+            squat_first_attempt = gr.Slider(minimum=0, maximum=1000, value=150, label="Squat Attempt 1 (kg)")
+>>>>>>> e5c8c69266310150c7efaceefefb67a0b214adc1
 
     submit_btn = gr.Button("Get Predictions", variant="primary")
 
@@ -171,7 +201,11 @@ with gr.Blocks(title="Power Lifting SBD Predictor") as demo:
     health_btn.click(fn=check_health, outputs=health_output)
     submit_btn.click(
         fn=predict,
+<<<<<<< HEAD
         inputs=[name_input, weight_input, squat_input, bench_input, deadlift_input, sex_input, long_distance_input, squat_first_attempt_input],
+=======
+        inputs=[name_input, weight_input, squat_input, bench_input, deadlift_input, sex_input, squat_first_attempt],
+>>>>>>> e5c8c69266310150c7efaceefefb67a0b214adc1
         outputs=output
     )
 
