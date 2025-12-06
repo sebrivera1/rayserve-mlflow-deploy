@@ -341,8 +341,19 @@ async def predict(
             warnings.filterwarnings("ignore", message="X has feature names")
             result = model.predict(df)
 
+        # Handle different result types (DataFrame, numpy array, etc.)
+        if isinstance(result, pd.DataFrame):
+            if 'predict' in result.columns:
+                prediction = result['predict'].tolist()
+            else:
+                prediction = result.iloc[:, 0].tolist()
+        elif hasattr(result, 'tolist'):
+            prediction = result.tolist()
+        else:
+            prediction = result
+
         return {
-            "prediction": result.tolist() if hasattr(result, 'tolist') else result,
+            "prediction": prediction,
             "version": version,
             "model": MODEL_NAME
         }
@@ -450,9 +461,25 @@ async def predict_full(
             cluster_result = model_1.predict(df_cluster)
 
         logger.info(f"[Model 1] Raw prediction result: {cluster_result}")
+        logger.info(f"[Model 1] Result type: {type(cluster_result)}")
 
-        # Extract cluster value
-        cluster_value = cluster_result[0] if hasattr(cluster_result, '__getitem__') else cluster_result
+        # Extract cluster value - handle both DataFrame and array results
+        if isinstance(cluster_result, pd.DataFrame):
+            # For DataFrame results (like from H2O models)
+            if 'predict' in cluster_result.columns:
+                cluster_value = cluster_result['predict'].iloc[0]
+            else:
+                cluster_value = cluster_result.iloc[0, 0]
+        elif isinstance(cluster_result, np.ndarray):
+            # For numpy array results
+            cluster_value = cluster_result[0]
+        elif hasattr(cluster_result, '__getitem__') and not isinstance(cluster_result, str):
+            # For list or other indexable types
+            cluster_value = cluster_result[0]
+        else:
+            # For scalar results
+            cluster_value = cluster_result
+
         logger.info(f"[Model 1] ✓ Cluster prediction: {cluster_value}")
 
         # Stage 2: Predict total using model_2 with cluster output
@@ -504,7 +531,18 @@ async def predict_full(
 
         logger.info(f"[Model 2] Raw prediction result: {total_result}")
 
-        total_prediction = total_result[0] if hasattr(total_result, '__getitem__') else total_result
+        # H2O models return a DataFrame with a 'predict' column
+        if isinstance(total_result, pd.DataFrame):
+            if 'predict' in total_result.columns:
+                total_prediction = total_result['predict'].iloc[0]
+            else:
+                # Fallback: get the first column's first value
+                total_prediction = total_result.iloc[0, 0]
+        elif hasattr(total_result, '__getitem__') and not isinstance(total_result, str):
+            total_prediction = total_result[0]
+        else:
+            total_prediction = total_result
+
         logger.info(f"[Model 2] ✓ Total prediction: {total_prediction}")
 
         response = {
