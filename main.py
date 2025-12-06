@@ -6,10 +6,20 @@ import pandas as pd
 import numpy as np
 import uvicorn
 import warnings
+import traceback
+import logging
 from typing import Optional, Dict, Any
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Header, HTTPException, status
+from fastapi import FastAPI, Header, HTTPException, status, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 # Global state
 MODEL_NAME = os.getenv("MODEL_NAME", "lifter-kmeans")
@@ -56,6 +66,22 @@ def install_model_dependencies(model_name: str, model_version: str) -> bool:
                 print(f"✓ Successfully installed dependencies for {model_name}")
                 if result.stdout:
                     print(f"Install output: {result.stdout[-500:]}")  # Last 500 chars
+
+                # CRITICAL FIX: Force downgrade scipy to compatible version
+                # MLflow may install scipy 1.16.3 which is incompatible with scikit-learn 1.6.1
+                print(f"Forcing scipy==1.14.1 for compatibility with scikit-learn 1.6.1...")
+                fix_result = subprocess.run(
+                    [sys.executable, "-m", "pip", "install", "--force-reinstall", "--no-deps", "scipy==1.14.1"],
+                    capture_output=True,
+                    text=True,
+                    timeout=60
+                )
+
+                if fix_result.returncode == 0:
+                    print(f"✓ scipy 1.14.1 installed successfully")
+                else:
+                    print(f"⚠ Warning: Could not force scipy version: {fix_result.stderr}")
+
                 return True
             else:
                 print(f"⚠ Warning: Failed to install some dependencies for {model_name}")
@@ -106,6 +132,7 @@ async def lifespan(app: FastAPI):
     # Load default models on startup
     try:
         # Load model 1 (clustering)
+        logger.info(f"Loading model 1: {MODEL_NAME} version {MODEL_VERSION}")
         model_uri_1 = f"models:/{MODEL_NAME}/{MODEL_VERSION}"
         loaded_model_1 = mlflow.pyfunc.load_model(model_uri_1)
         cache_key_1 = f"{MODEL_NAME}:{MODEL_VERSION}"
@@ -116,19 +143,26 @@ async def lifespan(app: FastAPI):
             default_signature = loaded_model_1.metadata.signature
 
         print(f"✓ Loaded model 1 (clustering): {MODEL_NAME} version {MODEL_VERSION}")
+        logger.info(f"✓ Model 1 loaded successfully")
     except Exception as e:
         print(f"✗ Warning: Could not load model 1 (clustering): {e}")
+        logger.error(f"Failed to load model 1: {e}")
+        logger.error(f"Full traceback:\n{traceback.format_exc()}")
 
     try:
         # Load model 2 (total predictor)
+        logger.info(f"Loading model 2: {MODEL_2_NAME} version {MODEL_2_VERSION}")
         model_uri_2 = f"models:/{MODEL_2_NAME}/{MODEL_2_VERSION}"
         loaded_model_2 = mlflow.pyfunc.load_model(model_uri_2)
         cache_key_2 = f"{MODEL_2_NAME}:{MODEL_2_VERSION}"
         model_cache[cache_key_2] = loaded_model_2
 
         print(f"✓ Loaded model 2 (total predictor): {MODEL_2_NAME} version {MODEL_2_VERSION}")
+        logger.info(f"✓ Model 2 loaded successfully")
     except Exception as e:
         print(f"✗ Warning: Could not load model 2 (total predictor): {e}")
+        logger.error(f"Failed to load model 2: {e}")
+        logger.error(f"Full traceback:\n{traceback.format_exc()}")
 
     print("\n" + "="*80)
     print("Server Ready")
@@ -342,16 +376,42 @@ async def predict_full(
     - squat_first_attempt: float (first squat attempt at meet)
     - total: float (squat + bench + deadlift)
     """
+    logger.info("="*80)
+    logger.info("/predict_full endpoint called")
+    logger.info(f"Request payload: {request.model_input}")
+
     version_1 = request.version or serve_multiplexed_model_id or MODEL_VERSION
     version_2 = request.model_2_version or MODEL_2_VERSION
 
+    logger.info(f"Model versions - clustering: {version_1}, total predictor: {version_2}")
+
     try:
         # Load both models
+        logger.info(f"Loading models from cache...")
+        logger.info(f"Cache keys available: {list(model_cache.keys())}")
+
+        # Check if model 1 exists in cache
+        cache_key_1 = f"{MODEL_NAME}:{version_1}"
+        if cache_key_1 not in model_cache:
+            error_msg = f"Model 1 (clustering) not loaded in cache. Available models: {list(model_cache.keys())}"
+            logger.error(error_msg)
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"Clustering model not available. Server may still be starting up or model failed to load during startup."
+            )
+
         model_1 = load_model(version_1, MODEL_NAME)
+        logger.info(f"✓ Model 1 loaded from cache")
+
         model_2 = load_model(version_2, MODEL_2_NAME)
+        logger.info(f"✓ Model 2 loaded from cache")
+
     except ValueError as e:
+        logger.error(f"ValueError loading models: {e}")
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
     except Exception as e:
+        logger.error(f"Error loading models: {e}")
+        logger.error(f"Full traceback:\n{traceback.format_exc()}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error loading models: {str(e)}"
@@ -361,12 +421,15 @@ async def predict_full(
         payload_input = request.model_input
 
         # Stage 1: Predict cluster using model_1
+        logger.info("STAGE 1: Clustering prediction")
         payload_lower = {k.lower(): v for k, v in payload_input.items()}
 
         # Extract values for model 1
         squat_kg = float(payload_lower.get('squat', 0.0))
         bench_kg = float(payload_lower.get('bench', 0.0))
         deadlift_kg = float(payload_lower.get('deadlift', 0.0))
+
+        logger.info(f"Extracted lifts - squat: {squat_kg}, bench: {bench_kg}, deadlift: {deadlift_kg}")
 
         # Transform for model 1 (clustering)
         cluster_payload = {
@@ -376,20 +439,24 @@ async def predict_full(
         }
         df_cluster = transform_payload_to_features(cluster_payload)
 
-        print(f"[Model 1] Transformed input shape: {df_cluster.shape}")
-        print(f"[Model 1] Transformed data:\n{df_cluster.to_dict(orient='records')}")
+        logger.info(f"[Model 1] Transformed input shape: {df_cluster.shape}")
+        logger.info(f"[Model 1] Transformed columns: {df_cluster.columns.tolist()}")
+        logger.info(f"[Model 1] Transformed data:\n{df_cluster.to_dict(orient='records')}")
 
         # Predict cluster
+        logger.info("[Model 1] Starting prediction...")
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", message="X has feature names")
             cluster_result = model_1.predict(df_cluster)
 
+        logger.info(f"[Model 1] Raw prediction result: {cluster_result}")
+
         # Extract cluster value
         cluster_value = cluster_result[0] if hasattr(cluster_result, '__getitem__') else cluster_result
-        print(f"[Model 1] Cluster prediction: {cluster_value}")
+        logger.info(f"[Model 1] ✓ Cluster prediction: {cluster_value}")
 
         # Stage 2: Predict total using model_2 with cluster output
-        # Build payload for model 2
+        logger.info("STAGE 2: Total prediction")
 
         # Extract squat_first_attempt, defaulting to squat if not provided or invalid
         squat_first_attempt_raw = payload_lower.get('squat_first_attempt')
@@ -418,24 +485,29 @@ async def predict_full(
             'long_distance_travel': long_distance
         }
 
-        print(f"[Model 2] Extracted squat_first_attempt: {squat_first_attempt}")
-        print(f"[Model 2] Extracted long_distance: {long_distance}")
+        logger.info(f"[Model 2] Extracted squat_first_attempt: {squat_first_attempt}")
+        logger.info(f"[Model 2] Extracted bodyweight: {payload_lower.get('weight', 0.0)}")
+        logger.info(f"[Model 2] Extracted sex: {payload_lower.get('sex', 'M').upper()}")
+        logger.info(f"[Model 2] Extracted long_distance: {long_distance}")
 
         df_total = transform_payload_for_second_model(model_2_payload)
 
-        print(f"[Model 2] Transformed input shape: {df_total.shape}")
-        print(f"[Model 2] Transformed columns: {df_total.columns.tolist()}")
-        print(f"[Model 2] Transformed data:\n{df_total.to_dict(orient='records')}")
+        logger.info(f"[Model 2] Transformed input shape: {df_total.shape}")
+        logger.info(f"[Model 2] Transformed columns: {df_total.columns.tolist()}")
+        logger.info(f"[Model 2] Transformed data:\n{df_total.to_dict(orient='records')}")
 
         # Predict total
+        logger.info("[Model 2] Starting prediction...")
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", message="X has feature names")
             total_result = model_2.predict(df_total)
 
-        total_prediction = total_result[0] if hasattr(total_result, '__getitem__') else total_result
-        print(f"[Model 2] Total prediction: {total_prediction}")
+        logger.info(f"[Model 2] Raw prediction result: {total_result}")
 
-        return {
+        total_prediction = total_result[0] if hasattr(total_result, '__getitem__') else total_result
+        logger.info(f"[Model 2] ✓ Total prediction: {total_prediction}")
+
+        response = {
             "cluster_prediction": int(cluster_value) if isinstance(cluster_value, (int, float)) else cluster_value,
             "total_prediction": float(total_prediction) if isinstance(total_prediction, (int, float)) else total_prediction,
             "model_1_version": version_1,
@@ -453,14 +525,25 @@ async def predict_full(
                 "long_distance": payload_lower.get('long_distance', False)
             }
         }
+
+        logger.info("✓ Prediction successful!")
+        logger.info(f"Response: {response}")
+        logger.info("="*80)
+
+        return response
+
     except Exception as e:
-        print(f"Prediction error details:")
-        print(f"  Error: {str(e)}")
-        print(f"  Input payload: {request.model_input}")
+        logger.error("="*80)
+        logger.error("PREDICTION ERROR")
+        logger.error(f"Error type: {type(e).__name__}")
+        logger.error(f"Error message: {str(e)}")
+        logger.error(f"Input payload: {request.model_input}")
+        logger.error(f"Full traceback:\n{traceback.format_exc()}")
+        logger.error("="*80)
 
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Prediction error: {str(e)}"
+            detail=f"Prediction error: {type(e).__name__}: {str(e)}"
         )
 
 @app.get("/health")
