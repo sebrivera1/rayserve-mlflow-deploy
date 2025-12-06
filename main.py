@@ -1,4 +1,6 @@
 import os
+import sys
+import subprocess
 import mlflow
 import pandas as pd
 import numpy as np
@@ -17,6 +19,48 @@ MODEL_2_VERSION = os.getenv("MODEL_2_VERSION", "1")
 model_cache = {}
 default_signature = None
 
+def install_model_dependencies(model_name: str, model_version: str) -> bool:
+    """
+    Install model-specific dependencies from MLflow.
+    Returns True if successful, False otherwise.
+    """
+    try:
+        print(f"Checking dependencies for {model_name} v{model_version}...")
+
+        # Get model dependencies from MLflow
+        model_uri = f"models:/{model_name}/{model_version}"
+        deps_file = mlflow.pyfunc.get_model_dependencies(model_uri)
+
+        if deps_file:
+            print(f"Found dependencies file: {deps_file}")
+            print(f"Installing dependencies for {model_name}...")
+
+            # Install using pip
+            result = subprocess.run(
+                [sys.executable, "-m", "pip", "install", "-r", deps_file, "--quiet"],
+                capture_output=True,
+                text=True,
+                timeout=300  # 5 minute timeout
+            )
+
+            if result.returncode == 0:
+                print(f"✓ Successfully installed dependencies for {model_name}")
+                return True
+            else:
+                print(f"⚠ Warning: Failed to install some dependencies for {model_name}")
+                print(f"Error: {result.stderr}")
+                return False
+        else:
+            print(f"No dependencies file found for {model_name}, skipping...")
+            return True
+
+    except subprocess.TimeoutExpired:
+        print(f"✗ Timeout installing dependencies for {model_name}")
+        return False
+    except Exception as e:
+        print(f"⚠ Warning: Could not install dependencies for {model_name}: {e}")
+        return False
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan event handler for startup and shutdown"""
@@ -31,6 +75,19 @@ async def lifespan(app: FastAPI):
     mlflow.set_tracking_uri(tracking_uri)
     print(f"MLflow tracking URI set to: {tracking_uri}")
 
+    # Install model dependencies before loading models
+    print("\n" + "="*80)
+    print("Installing Model Dependencies")
+    print("="*80)
+
+    # Install dependencies for both models
+    install_model_dependencies(MODEL_NAME, MODEL_VERSION)
+    install_model_dependencies(MODEL_2_NAME, MODEL_2_VERSION)
+
+    print("="*80)
+    print("Loading Models")
+    print("="*80 + "\n")
+
     # Load default models on startup
     try:
         # Load model 1 (clustering)
@@ -43,9 +100,9 @@ async def lifespan(app: FastAPI):
         if loaded_model_1.metadata and hasattr(loaded_model_1.metadata, 'signature'):
             default_signature = loaded_model_1.metadata.signature
 
-        print(f"Loaded model 1 (clustering): {MODEL_NAME} version {MODEL_VERSION}")
+        print(f"✓ Loaded model 1 (clustering): {MODEL_NAME} version {MODEL_VERSION}")
     except Exception as e:
-        print(f"Warning: Could not load model 1 (clustering): {e}")
+        print(f"✗ Warning: Could not load model 1 (clustering): {e}")
 
     try:
         # Load model 2 (total predictor)
@@ -54,9 +111,13 @@ async def lifespan(app: FastAPI):
         cache_key_2 = f"{MODEL_2_NAME}:{MODEL_2_VERSION}"
         model_cache[cache_key_2] = loaded_model_2
 
-        print(f"Loaded model 2 (total predictor): {MODEL_2_NAME} version {MODEL_2_VERSION}")
+        print(f"✓ Loaded model 2 (total predictor): {MODEL_2_NAME} version {MODEL_2_VERSION}")
     except Exception as e:
-        print(f"Warning: Could not load model 2 (total predictor): {e}")
+        print(f"✗ Warning: Could not load model 2 (total predictor): {e}")
+
+    print("\n" + "="*80)
+    print("Server Ready")
+    print("="*80 + "\n")
 
     yield
 
