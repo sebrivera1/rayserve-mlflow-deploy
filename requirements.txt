@@ -9,3 +9,5 @@ fastapi
 uvicorn
 pydantic
 requests
+h20
+matplotlib==3.10.0
