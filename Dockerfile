@@ -1,14 +1,14 @@
 # syntax=docker/dockerfile:1
 FROM python:3.12-slim
 
-# Install Java 17 (required for H2O)
+# Install Java 21 (required for H2O, supports Java 8-21)
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-    openjdk-17-jre-headless \
+    openjdk-21-jre-headless \
     && rm -rf /var/lib/apt/lists/*
 
 # Set JAVA_HOME environment variable
-ENV JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+ENV JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
 ENV PATH="${JAVA_HOME}/bin:${PATH}"
 
 # Copy uv from official image (no installation needed)
